@@ -70,6 +70,32 @@ pub fn main() !void {
 - `zigi.POST(url, handler)` - POST route
 - `zigi.routePrefix(method, prefix, handler)` - Prefix matching
 
+## Installation
+
+Add `zigi` as a dependency in your `build.zig.zon`:
+
+```bash
+zig fetch --save git@github.com:linychuo/zigi.git
+```
+
+Or manually add to your `build.zig.zon`:
+
+```zon
+.dependencies = .{
+    .zigi = .{
+        .url = "git@github.com:linychuo/zigi.git",
+        .hash = "<run zig fetch to get hash>",
+    },
+},
+```
+
+Then add to your `build.zig`:
+
+```zig
+const zigi_mod = b.dependency("zigi", .{}).module("zigi");
+exe.root_module.addImport("zigi", zigi_mod);
+```
+
 ## Dependencies
 
 None. Pure Zig standard library.
