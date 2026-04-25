@@ -7,6 +7,8 @@ pub const Method = enum {
     PUT,
     DELETE,
     PATCH,
+    HEAD,
+    OPTIONS,
     UNKNOWN,
 
     pub fn fromString(s: []const u8) Method {
@@ -15,6 +17,8 @@ pub const Method = enum {
         if (std.mem.eql(u8, s, "PUT")) return .PUT;
         if (std.mem.eql(u8, s, "DELETE")) return .DELETE;
         if (std.mem.eql(u8, s, "PATCH")) return .PATCH;
+        if (std.mem.eql(u8, s, "HEAD")) return .HEAD;
+        if (std.mem.eql(u8, s, "OPTIONS")) return .OPTIONS;
         return .UNKNOWN;
     }
 
@@ -25,6 +29,8 @@ pub const Method = enum {
             .PUT => "PUT",
             .DELETE => "DELETE",
             .PATCH => "PATCH",
+            .HEAD => "HEAD",
+            .OPTIONS => "OPTIONS",
             .UNKNOWN => "UNK",
         };
     }
@@ -71,17 +77,19 @@ pub const Request = struct {
     pub fn body(self: *Request) ![]u8 {
         const content_len = self.content_length orelse return error.NoContentLength;
 
-        if (self.body_start_offset < self.headers.len) {
-            const buffered_len = self.headers.len - self.body_start_offset;
+        const buffered_start = self.body_start_offset;
+        const buffered_len = if (buffered_start < self.headers.len) self.headers.len - buffered_start else 0;
+
+        if (buffered_len > 0) {
             if (buffered_len >= content_len) {
                 var buf = try self.allocator.alloc(u8, content_len);
-                @memcpy(buf[0..content_len], self.headers[self.body_start_offset..][0..content_len]);
+                @memcpy(buf[0..content_len], self.headers[buffered_start..][0..content_len]);
                 return buf;
             }
             const stream = self.stream orelse return error.NoStream;
 
             var buf = try self.allocator.alloc(u8, content_len);
-            @memcpy(buf[0..buffered_len], self.headers[self.body_start_offset..]);
+            @memcpy(buf[0..buffered_len], self.headers[buffered_start..]);
             var remaining = content_len - buffered_len;
             var offset = buffered_len;
 
@@ -94,6 +102,17 @@ pub const Request = struct {
             return buf;
         }
 
-        return error.BodyNotInBuffer;
+        const stream = self.stream orelse return error.NoStream;
+        var buf = try self.allocator.alloc(u8, content_len);
+        var remaining = content_len;
+        var offset: usize = 0;
+
+        while (remaining > 0) {
+            const n = stream.read(buf[offset..offset + remaining]) catch return error.ReadError;
+            if (n == 0) return error.ConnectionClosed;
+            offset += n;
+            remaining -= n;
+        }
+        return buf;
     }
 };

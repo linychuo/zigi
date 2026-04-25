@@ -16,3 +16,4 @@ pub const Server = @import("server.zig").Server;
 pub const parseRequest = @import("server.zig").parseRequest;
 pub const streamFile = @import("server.zig").streamFile;
 pub const streamFileChunked = @import("server.zig").streamFileChunked;
+pub const decodeChunkedTransfer = @import("server.zig").decodeChunkedTransfer;

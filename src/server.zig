@@ -92,8 +92,7 @@ pub fn parseRequest(allocator: std.mem.Allocator, conn: *net.Server.Connection) 
 
     if (header_len == 0) return error.ConnectionClosed;
 
-    const headers = try allocator.alloc(u8, header_len);
-    @memcpy(headers, header_buf[0..header_len]);
+    const headers = try allocator.dupe(u8, header_buf[0..header_len]);
 
     const first_line_end = std.mem.indexOfScalar(u8, headers, '\r') orelse
         std.mem.indexOfScalar(u8, headers, '\n') orelse return error.InvalidRequest;
@@ -178,6 +177,14 @@ pub fn streamFileChunked(
     writer: anytype,
     max_size: usize,
 ) !usize {
+    return try decodeChunkedTransfer(stream, writer, max_size);
+}
+
+pub fn decodeChunkedTransfer(
+    stream: net.Stream,
+    writer: anytype,
+    max_size: usize,
+) !usize {
     var total_written: usize = 0;
     var chunk_buf: [65536]u8 = undefined;
 
@@ -186,7 +193,7 @@ pub fn streamFileChunked(
         var size_len: usize = 0;
 
         while (size_len < size_buf.len) {
-            const n = stream.read(size_buf[size_len..1]) catch return error.ReadError;
+            const n = try stream.read(size_buf[size_len..]);
             if (n == 0) break;
             size_len += n;
             if (size_len >= 2 and size_buf[size_len - 1] == '\n' and size_buf[size_len - 2] == '\r') {
@@ -208,7 +215,7 @@ pub fn streamFileChunked(
         var remaining = chunk_size;
         while (remaining > 0) {
             const to_read = @min(chunk_buf.len, remaining);
-            const n = stream.read(chunk_buf[0..to_read]) catch return error.ReadError;
+            const n = try stream.read(chunk_buf[0..to_read]);
             if (n == 0) break;
             try writer.writeAll(chunk_buf[0..n]);
             total_written += n;
@@ -216,7 +223,7 @@ pub fn streamFileChunked(
         }
 
         var crlf: [2]u8 = undefined;
-        _ = stream.read(&crlf) catch break;
+        _ = try stream.read(&crlf);
     }
 
     return total_written;

@@ -52,3 +52,11 @@ pub fn DELETE(comptime url: []const u8, handler: anytype) Route(@TypeOf(handler)
 pub fn PATCH(comptime url: []const u8, handler: anytype) Route(@TypeOf(handler)) {
     return route(.PATCH, url, handler);
 }
+
+pub fn HEAD(comptime url: []const u8, handler: anytype) Route(@TypeOf(handler)) {
+    return route(.HEAD, url, handler);
+}
+
+pub fn OPTIONS(comptime url: []const u8, handler: anytype) Route(@TypeOf(handler)) {
+    return route(.OPTIONS, url, handler);
+}

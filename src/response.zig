@@ -42,7 +42,7 @@ pub const Response = struct {
             "HTTP/1.1 {d} OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
             .{ status_code, content_type, body.len },
         ) catch {
-            try self.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+            try self.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: 17\r\n\r\nHeader Too Large");
             return;
         };
         try self.stream.writeAll(header);
