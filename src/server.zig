@@ -12,6 +12,7 @@ pub const Server = struct {
     allocator: std.mem.Allocator,
     listener: net.Server,
     running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    connection_timeout_ns: u64,
 
     const Self = @This();
 
@@ -21,12 +22,17 @@ pub const Server = struct {
         return Self{
             .allocator = allocator,
             .listener = listener,
+            .connection_timeout_ns = 30 * std.time.ns_per_s,
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.running.store(false, .seq_cst);
         self.listener.deinit();
+    }
+
+    pub fn setConnectionTimeout(self: *Self, seconds: u64) void {
+        self.connection_timeout_ns = seconds * std.time.ns_per_s;
     }
 
     pub fn run(self: *Self, comptime routes: anytype, context: ?*anyopaque) !void {
@@ -46,23 +52,33 @@ pub const Server = struct {
             }) catch |err| {
                 std.log.warn("Failed to spawn connection thread: {}", .{err});
                 conn.stream.close();
+                continue;
             };
         }
     }
 
     fn handleConnection(self: *Self, comptime routes: anytype, context: ?*anyopaque, conn: net.Server.Connection) void {
+        const start_time = std.time.nanoTimestamp();
         var mutable_conn = conn;
         defer mutable_conn.stream.close();
 
         var req = parseRequest(self.allocator, &mutable_conn) catch return;
         defer req.deinit();
 
+        const parse_time = std.time.nanoTimestamp() - start_time;
+        if (parse_time > self.connection_timeout_ns) {
+            std.log.warn("Request parse timeout", .{});
+            return;
+        }
+
+        req.decodeUrl();
+
         var res = Response.init(mutable_conn.stream);
 
         inline for (routes, 0..) |route_item, _i| {
             _ = _i;
             if (route_item.matches(req.method, req.url)) {
-                route_item.handler(mutable_conn.stream, &req, &res, context) catch |err| {
+                route_item.handler(&req, &res, context) catch |err| {
                     std.log.warn("Handler error: {}", .{err});
                     res.sendError(500, "Internal Server Error") catch {};
                 };
@@ -127,7 +143,8 @@ pub fn parseRequest(allocator: std.mem.Allocator, conn: *net.Server.Connection) 
                 content_length = std.fmt.parseUnsigned(usize, value, 10) catch null;
             }
             if (std.mem.startsWith(u8, clean_line, "Transfer-Encoding:")) {
-                if (std.mem.indexOf(u8, clean_line, "chunked") != null) {
+                const value = std.mem.trim(u8, clean_line[17..], " ");
+                if (std.mem.eql(u8, value, "chunked")) {
                     chunked_transfer = true;
                 }
             }
@@ -143,88 +160,5 @@ pub fn parseRequest(allocator: std.mem.Allocator, conn: *net.Server.Connection) 
         .body_start_offset = body_start_offset,
         .content_length = content_length,
         .chunked_transfer = chunked_transfer,
-        .stream = conn.stream,
     };
-}
-
-pub fn streamFile(
-    stream: net.Stream,
-    expected_size: usize,
-    writer: anytype,
-    progress_callback: ?fn (bytes_written: usize, total: usize) void,
-) !usize {
-    var total_written: usize = 0;
-    var chunk_buf: [65536]u8 = undefined;
-
-    while (total_written < expected_size) {
-        const remaining = expected_size - total_written;
-        const to_read = @min(chunk_buf.len, remaining);
-        const n = stream.read(chunk_buf[0..to_read]) catch return error.ReadError;
-        if (n == 0) break;
-        try writer.writeAll(chunk_buf[0..n]);
-        total_written += n;
-
-        if (progress_callback) |cb| {
-            cb(total_written, expected_size);
-        }
-    }
-
-    return total_written;
-}
-
-pub fn streamFileChunked(
-    stream: net.Stream,
-    writer: anytype,
-    max_size: usize,
-) !usize {
-    return try decodeChunkedTransfer(stream, writer, max_size);
-}
-
-pub fn decodeChunkedTransfer(
-    stream: net.Stream,
-    writer: anytype,
-    max_size: usize,
-) !usize {
-    var total_written: usize = 0;
-    var chunk_buf: [65536]u8 = undefined;
-
-    while (true) {
-        var size_buf: [32]u8 = undefined;
-        var size_len: usize = 0;
-
-        while (size_len < size_buf.len) {
-            const n = try stream.read(size_buf[size_len..]);
-            if (n == 0) break;
-            size_len += n;
-            if (size_len >= 2 and size_buf[size_len - 1] == '\n' and size_buf[size_len - 2] == '\r') {
-                break;
-            }
-        }
-
-        if (size_len < 3) break;
-
-        const size_str = std.mem.trim(u8, size_buf[0..size_len - 2], " \t");
-        const chunk_size = std.fmt.parseUnsigned(usize, size_str, 16) catch 0;
-
-        if (chunk_size == 0) break;
-
-        if (total_written + chunk_size > max_size) {
-            return error.FileTooLarge;
-        }
-
-        var remaining = chunk_size;
-        while (remaining > 0) {
-            const to_read = @min(chunk_buf.len, remaining);
-            const n = try stream.read(chunk_buf[0..to_read]);
-            if (n == 0) break;
-            try writer.writeAll(chunk_buf[0..n]);
-            total_written += n;
-            remaining -= n;
-        }
-
-        var crlf: [2]u8 = undefined;
-        _ = try stream.read(&crlf);
-    }
-
-    return total_written;
 }

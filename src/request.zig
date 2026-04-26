@@ -45,7 +45,6 @@ pub const Request = struct {
     body_start_offset: usize,
     content_length: ?usize,
     chunked_transfer: bool,
-    stream: ?net.Stream,
 
     pub fn deinit(self: *Request) void {
         self.allocator.free(self.headers);
@@ -66,16 +65,23 @@ pub const Request = struct {
 
     pub fn getQueryParam(self: *const Request, param: []const u8) ?[]const u8 {
         if (self.query.len == 0) return null;
-        const param_start = std.mem.indexOf(u8, self.query, param) orelse return null;
-        const after_param = self.query[param_start + param.len..];
-        if (after_param.len == 0 or after_param[0] != '=') return null;
-        const value_start = after_param[1..];
-        const value_end = std.mem.indexOfScalar(u8, value_start, '&') orelse value_start.len;
-        return value_start[0..value_end];
+        var it = std.mem.splitScalar(u8, self.query, '&');
+        while (it.next()) |pair| {
+            if (std.mem.indexOfScalar(u8, pair, '=')) |eq| {
+                if (std.mem.eql(u8, pair[0..eq], param)) {
+                    return pair[eq + 1..];
+                }
+            }
+        }
+        return null;
     }
 
-    pub fn body(self: *Request) ![]u8 {
+    pub fn body(self: *Request, stream: net.Stream, max_size: usize) ![]u8 {
+        if (self.chunked_transfer) {
+            return decodeChunkedBody(stream, self.allocator, max_size);
+        }
         const content_len = self.content_length orelse return error.NoContentLength;
+        if (content_len > max_size) return error.BodyTooLarge;
 
         const buffered_start = self.body_start_offset;
         const buffered_len = if (buffered_start < self.headers.len) self.headers.len - buffered_start else 0;
@@ -86,8 +92,6 @@ pub const Request = struct {
                 @memcpy(buf[0..content_len], self.headers[buffered_start..][0..content_len]);
                 return buf;
             }
-            const stream = self.stream orelse return error.NoStream;
-
             var buf = try self.allocator.alloc(u8, content_len);
             @memcpy(buf[0..buffered_len], self.headers[buffered_start..]);
             var remaining = content_len - buffered_len;
@@ -102,7 +106,6 @@ pub const Request = struct {
             return buf;
         }
 
-        const stream = self.stream orelse return error.NoStream;
         var buf = try self.allocator.alloc(u8, content_len);
         var remaining = content_len;
         var offset: usize = 0;
@@ -115,4 +118,72 @@ pub const Request = struct {
         }
         return buf;
     }
+
+fn decodeChunkedBody(stream: net.Stream, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
+    var result = std.ArrayList(u8).init(allocator);
+    errdefer result.deinit();
+
+    while (true) {
+        var size_buf: [32]u8 = undefined;
+        var size_len: usize = 0;
+
+        while (size_len < size_buf.len) {
+            const n = try stream.read(size_buf[size_len..1]);
+            if (n == 0) return error.ConnectionClosed;
+            size_len += n;
+            if (size_len >= 2 and size_buf[size_len - 1] == '\n' and size_buf[size_len - 2] == '\r') break;
+        }
+
+        if (size_len < 3) break;
+
+        const chunk_size = std.fmt.parseUnsigned(usize, std.mem.trim(u8, size_buf[0..size_len - 2], " \t"), 16) catch 0;
+        if (chunk_size == 0) break;
+        if (result.items.len + chunk_size > max_size) return error.BodyTooLarge;
+
+        try result.ensureUnusedCapacity(chunk_size);
+        const n = try stream.readAtLeast(result.unusedCapacitySlice(), chunk_size);
+        result.items.len += n;
+
+        _ = try stream.read(&[_]u8{ 0, 0 });
+    }
+
+    return try result.toOwnedSlice();
+}
+
+pub fn decodeUrl(self: *Request) void {
+        if (decodePercent(self.url, self.allocator)) |decoded| {
+            self.url = decoded;
+        }
+        if (decodePercent(self.query, self.allocator)) |decoded| {
+            self.query = decoded;
+        }
+    }
 };
+
+fn decodePercent(s: []const u8, allocator: std.mem.Allocator) ?[]u8 {
+    var result = allocator.alloc(u8, s.len) catch return null;
+    errdefer allocator.free(result);
+    var j: usize = 0;
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        if (s[i] == '%' and i + 2 < s.len) {
+            const hex = s[i + 1..i + 3];
+            if (std.fmt.parseInt(u8, hex, 16)) |val| {
+                result[j] = val;
+                j += 1;
+                i += 2;
+            } else |_| {
+                result[j] = s[i];
+                j += 1;
+            }
+        } else {
+            result[j] = s[i];
+            j += 1;
+        }
+    }
+    if (j < s.len) {
+        const shorter = allocator.realloc(result, j) catch result;
+        result = shorter;
+    }
+    return result;
+}

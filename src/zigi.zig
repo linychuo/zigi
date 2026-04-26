@@ -13,7 +13,3 @@ pub const ContentType = @import("response.zig").ContentType;
 pub const Response = @import("response.zig").Response;
 pub const Request = @import("request.zig").Request;
 pub const Server = @import("server.zig").Server;
-pub const parseRequest = @import("server.zig").parseRequest;
-pub const streamFile = @import("server.zig").streamFile;
-pub const streamFileChunked = @import("server.zig").streamFileChunked;
-pub const decodeChunkedTransfer = @import("server.zig").decodeChunkedTransfer;
