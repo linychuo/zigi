@@ -90,6 +90,10 @@ pub fn main() !void {
 fn handler(req: *zigi.Request, res: *zigi.Response, context: ?*anyopaque) anyerror!void
 ```
 
+## Requirements
+
+- Zig 0.15.2
+
 ## Installation
 
 Add `zigi` as a dependency in your `build.zig.zon`:

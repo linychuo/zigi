@@ -29,8 +29,8 @@ pub fn decodePercent(s: []const u8, allocator: std.mem.Allocator) ?[]u8 {
 }
 
 pub fn decodeChunkedBody(stream: anytype, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
+    var result = try std.ArrayList(u8).initCapacity(allocator, 0);
+    errdefer result.deinit(allocator);
 
     while (true) {
         var size_buf: [32]u8 = undefined;
@@ -49,12 +49,13 @@ pub fn decodeChunkedBody(stream: anytype, allocator: std.mem.Allocator, max_size
         if (chunk_size == 0) break;
         if (result.items.len + chunk_size > max_size) return error.BodyTooLarge;
 
-        try result.ensureUnusedCapacity(chunk_size);
+        try result.ensureUnusedCapacity(allocator, chunk_size);
         const n = try stream.readAtLeast(result.unusedCapacitySlice(), chunk_size);
         result.items.len += n;
 
-        _ = try stream.read(&[_]u8{ 0, 0 });
+        var discard = [2]u8{ 0, 0 };
+        _ = try stream.read(&discard);
     }
 
-    return try result.toOwnedSlice();
+    return try result.toOwnedSlice(allocator);
 }

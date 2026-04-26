@@ -23,10 +23,11 @@ Entry point: `src/zigi.zig` (re-exports all modules)
 
 ## Important Notes
 
-- Handler signature: `fn (stream: std.net.Stream, req: *zigi.Request, context: ?*anyopaque) anyerror!void`
+- Handler signature: `fn (req: *zigi.Request, res: *zigi.Response, context: ?*anyopaque) anyerror!void`
 - `context` is passed from `server.run(routes, context)`
 - Server `running` flag uses `std.atomic.Value(bool)` for thread-safe shutdown
 - HTTP parser handles both `\r\n\r\n` and `\n\n` (LocalSend clients send non-standard)
+- Requires Zig 0.15.2 (uses `ArrayList.initCapacity` and requires allocator passed to methods)
 
 ## Examples
 
