@@ -11,6 +11,7 @@ Lightweight HTTP server library for Zig.
 - Configurable CORS
 - Thread-safe server shutdown via atomic flags
 - Handles non-standard CRLF (LocalSend clients)
+- HTTP header names are case-insensitive (Content-Length, content-length, etc.)
 
 ## Usage
 
