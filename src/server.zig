@@ -137,13 +137,13 @@ pub fn parseRequest(allocator: std.mem.Allocator, conn: *net.Server.Connection) 
         var line_it = std.mem.splitScalar(u8, header_text, '\n');
         while (line_it.next()) |line| {
             const clean_line: []const u8 = if (std.mem.indexOfScalar(u8, line, '\r')) |r| line[0..r] else line;
-
-            if (std.mem.startsWith(u8, clean_line, "Content-Length:")) {
+            if (clean_line.len < 15) continue;
+            if (std.ascii.eqlIgnoreCase(clean_line[0..15], "Content-Length:")) {
                 const value = std.mem.trim(u8, clean_line[15..], " ");
                 content_length = std.fmt.parseUnsigned(usize, value, 10) catch null;
-            }
-            if (std.mem.startsWith(u8, clean_line, "Transfer-Encoding:")) {
-                const value = std.mem.trim(u8, clean_line[17..], " ");
+            } else if (clean_line.len < 18) continue;
+            if (std.ascii.eqlIgnoreCase(clean_line[0..18], "Transfer-Encoding:")) {
+                const value = std.mem.trim(u8, clean_line[18..], " ");
                 if (std.mem.eql(u8, value, "chunked")) {
                     chunked_transfer = true;
                 }
