@@ -75,41 +75,93 @@ pub const Response = struct {
     }
 
     pub fn send(self: Response, status_code: u16, content_type: []const u8, body: []const u8) !void {
-        var header_buf: [1024]u8 = undefined;
-        const header = std.fmt.bufPrint(
-            &header_buf,
-            "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
-            .{ status_code, Status.text(status_code), content_type, body.len, self.cors_origin },
-        ) catch {
-            try self.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: 17\r\n\r\nHeader Too Large");
-            return;
-        };
-        try self.stream.writeAll(header);
+        // Calculate required buffer size dynamically
+        const header_size = "HTTP/1.1  XXX  \r\nContent-Type: \r\nContent-Length: XXXXXXXXXX\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: \r\n\r\n".len +
+                           Status.text(status_code).len + content_type.len + self.cors_origin.len + 20; // extra for numbers
+
+        if (header_size <= 1024) {
+            var header_buf: [1024]u8 = undefined;
+            const header = std.fmt.bufPrint(
+                &header_buf,
+                "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{ status_code, Status.text(status_code), content_type, body.len, self.cors_origin },
+            ) catch {
+                try self.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: 17\r\n\r\nHeader Too Large");
+                return;
+            };
+            try self.stream.writeAll(header);
+        } else {
+            // Use dynamic allocation for large headers
+            const header_buf = try std.heap.page_allocator.alloc(u8, header_size);
+            defer std.heap.page_allocator.free(header_buf);
+
+            const header = std.fmt.bufPrint(
+                header_buf,
+                "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{ status_code, Status.text(status_code), content_type, body.len, self.cors_origin },
+            ) catch {
+                try self.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: 17\r\n\r\nHeader Too Large");
+                return;
+            };
+            try self.stream.writeAll(header);
+        }
         try self.stream.writeAll(body);
     }
 
     pub fn ok(self: Response) !void {
-        var header_buf: [256]u8 = undefined;
-        const header = std.fmt.bufPrint(
-            &header_buf,
-            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
-            .{self.cors_origin},
-        ) catch {
-            return;
-        };
-        try self.stream.writeAll(header);
+        const header_size = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: \r\n\r\n".len + self.cors_origin.len;
+
+        if (header_size <= 256) {
+            var header_buf: [256]u8 = undefined;
+            const header = std.fmt.bufPrint(
+                &header_buf,
+                "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{self.cors_origin},
+            ) catch {
+                return;
+            };
+            try self.stream.writeAll(header);
+        } else {
+            const header_buf = try std.heap.page_allocator.alloc(u8, header_size);
+            defer std.heap.page_allocator.free(header_buf);
+
+            const header = std.fmt.bufPrint(
+                header_buf,
+                "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{self.cors_origin},
+            ) catch {
+                return;
+            };
+            try self.stream.writeAll(header);
+        }
     }
 
     pub fn continue_(self: Response) !void {
-        var header_buf: [256]u8 = undefined;
-        const header = std.fmt.bufPrint(
-            &header_buf,
-            "HTTP/1.1 100 Continue\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
-            .{self.cors_origin},
-        ) catch {
-            return;
-        };
-        try self.stream.writeAll(header);
+        const header_size = "HTTP/1.1 100 Continue\r\nAccess-Control-Allow-Origin: \r\n\r\n".len + self.cors_origin.len;
+
+        if (header_size <= 256) {
+            var header_buf: [256]u8 = undefined;
+            const header = std.fmt.bufPrint(
+                &header_buf,
+                "HTTP/1.1 100 Continue\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{self.cors_origin},
+            ) catch {
+                return;
+            };
+            try self.stream.writeAll(header);
+        } else {
+            const header_buf = try std.heap.page_allocator.alloc(u8, header_size);
+            defer std.heap.page_allocator.free(header_buf);
+
+            const header = std.fmt.bufPrint(
+                header_buf,
+                "HTTP/1.1 100 Continue\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{self.cors_origin},
+            ) catch {
+                return;
+            };
+            try self.stream.writeAll(header);
+        }
     }
 
     pub fn sendError(self: Response, status_code: u16, message: []const u8) !void {
@@ -121,15 +173,31 @@ pub const Response = struct {
     }
 
     pub fn okEmpty(self: Response) !void {
-        var header_buf: [256]u8 = undefined;
-        const header = std.fmt.bufPrint(
-            &header_buf,
-            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
-            .{self.cors_origin},
-        ) catch {
-            return;
-        };
-        try self.stream.writeAll(header);
+        const header_size = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: \r\n\r\n".len + self.cors_origin.len;
+
+        if (header_size <= 256) {
+            var header_buf: [256]u8 = undefined;
+            const header = std.fmt.bufPrint(
+                &header_buf,
+                "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{self.cors_origin},
+            ) catch {
+                return;
+            };
+            try self.stream.writeAll(header);
+        } else {
+            const header_buf = try std.heap.page_allocator.alloc(u8, header_size);
+            defer std.heap.page_allocator.free(header_buf);
+
+            const header = std.fmt.bufPrint(
+                header_buf,
+                "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{self.cors_origin},
+            ) catch {
+                return;
+            };
+            try self.stream.writeAll(header);
+        }
     }
 
     pub fn badRequest(self: Response, message: []const u8) !void {
@@ -152,6 +220,10 @@ pub const Response = struct {
         try self.json(Status.INTERNAL_SERVER_ERROR, message);
     }
 
+    pub fn methodNotAllowed(self: Response, message: []const u8) !void {
+        try self.json(Status.METHOD_NOT_ALLOWED, message);
+    }
+
     pub fn html(self: Response, status_code: u16, body: []const u8) !void {
         try self.send(status_code, ContentType.HTML, body);
     }
@@ -159,16 +231,36 @@ pub const Response = struct {
     pub fn file(self: Response, status_code: u16, body: []const u8, filename: []const u8) !void {
         const ext = if (std.mem.lastIndexOf(u8, filename, ".")) |i| filename[i + 1..] else "";
         const content_type = ContentType.fromExtension(ext);
-        var header_buf: [1024]u8 = undefined;
-        const header = std.fmt.bufPrint(
-            &header_buf,
-            "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nContent-Disposition: attachment; filename=\"{s}\"\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
-            .{ status_code, Status.text(status_code), content_type, body.len, filename, self.cors_origin },
-        ) catch {
-            try self.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
-            return;
-        };
-        try self.stream.writeAll(header);
+
+        // Calculate required buffer size dynamically
+        const header_size = "HTTP/1.1  XXX  \r\nContent-Type: \r\nContent-Length: XXXXXXXXXX\r\nContent-Disposition: attachment; filename=\"\"\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: \r\n\r\n".len +
+                           Status.text(status_code).len + content_type.len + filename.len + self.cors_origin.len + 20;
+
+        if (header_size <= 1024) {
+            var header_buf: [1024]u8 = undefined;
+            const header = std.fmt.bufPrint(
+                &header_buf,
+                "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nContent-Disposition: attachment; filename=\"{s}\"\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{ status_code, Status.text(status_code), content_type, body.len, filename, self.cors_origin },
+            ) catch {
+                try self.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+                return;
+            };
+            try self.stream.writeAll(header);
+        } else {
+            const header_buf = try std.heap.page_allocator.alloc(u8, header_size);
+            defer std.heap.page_allocator.free(header_buf);
+
+            const header = std.fmt.bufPrint(
+                header_buf,
+                "HTTP/1.1 {d} {s}\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nContent-Disposition: attachment; filename=\"{s}\"\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+                .{ status_code, Status.text(status_code), content_type, body.len, filename, self.cors_origin },
+            ) catch {
+                try self.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+                return;
+            };
+            try self.stream.writeAll(header);
+        }
         try self.stream.writeAll(body);
     }
 };

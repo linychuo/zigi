@@ -13,6 +13,14 @@ pub const Method = enum {
     UNKNOWN,
 
     pub fn fromString(s: []const u8) Method {
+        // Validate input length to prevent buffer overruns
+        if (s.len == 0 or s.len > 16) return .UNKNOWN;
+
+        // Check for valid characters (letters only)
+        for (s) |char| {
+            if (!std.ascii.isAlphabetic(char)) return .UNKNOWN;
+        }
+
         if (std.mem.eql(u8, s, "GET")) return .GET;
         if (std.mem.eql(u8, s, "POST")) return .POST;
         if (std.mem.eql(u8, s, "PUT")) return .PUT;
@@ -46,19 +54,33 @@ pub const Request = struct {
     body_start_offset: usize,
     content_length: ?usize,
     chunked_transfer: bool,
+    // Track decoded URL/query allocations for proper cleanup
+    _decoded_url: ?[]u8 = null,
+    _decoded_query: ?[]u8 = null,
 
     pub fn deinit(self: *Request) void {
         self.allocator.free(self.headers);
+        if (self._decoded_url) |decoded| {
+            self.allocator.free(decoded);
+        }
+        if (self._decoded_query) |decoded| {
+            self.allocator.free(decoded);
+        }
     }
 
     pub fn getHeader(self: *const Request, name: []const u8) ?[]const u8 {
         var line_it = std.mem.splitScalar(u8, self.headers, '\n');
         while (line_it.next()) |line| {
             const clean_line: []const u8 = if (std.mem.indexOfScalar(u8, line, '\r')) |r| line[0..r] else line;
-            if (clean_line.len > name.len and std.ascii.eqlIgnoreCase(clean_line[0..name.len], name)) {
-                var i = name.len;
-                while (i < clean_line.len and clean_line[i] == ' ') i += 1;
-                return clean_line[i..];
+
+            // Find colon and check if header name matches (case-insensitive)
+            if (std.mem.indexOfScalar(u8, clean_line, ':')) |colon_pos| {
+                const header_name = std.mem.trim(u8, clean_line[0..colon_pos], " \t");
+                if (std.ascii.eqlIgnoreCase(header_name, name)) {
+                    const value_start = colon_pos + 1;
+                    const header_value = std.mem.trim(u8, clean_line[value_start..], " \t");
+                    return header_value;
+                }
             }
         }
         return null;
@@ -122,9 +144,11 @@ pub const Request = struct {
 
     pub fn decodeUrl(self: *Request) void {
         if (util.decodePercent(self.url, self.allocator)) |decoded| {
+            self._decoded_url = decoded;
             self.url = decoded;
         }
         if (util.decodePercent(self.query, self.allocator)) |decoded| {
+            self._decoded_query = decoded;
             self.query = decoded;
         }
     }
