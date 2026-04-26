@@ -1,8 +1,9 @@
 const std = @import("std");
 const Method = @import("request.zig").Method;
 const Request = @import("request.zig").Request;
+const Response = @import("response.zig").Response;
 
-pub const Handler = fn (stream: std.net.Stream, request: *Request, context: ?*anyopaque) anyerror!void;
+pub const Handler = fn (stream: std.net.Stream, request: *Request, response: *Response, context: ?*anyopaque) anyerror!void;
 
 pub const MatchFn = *const fn (method: Method, url: []const u8) bool;
 

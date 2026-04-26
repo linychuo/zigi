@@ -57,12 +57,12 @@ pub const Server = struct {
         var req = parseRequest(self.allocator, &mutable_conn) catch return;
         defer req.deinit();
 
-        const res = Response.init(mutable_conn.stream);
+        var res = Response.init(mutable_conn.stream);
 
         inline for (routes, 0..) |route_item, _i| {
             _ = _i;
             if (route_item.matches(req.method, req.url)) {
-                route_item.handler(mutable_conn.stream, &req, context) catch |err| {
+                route_item.handler(mutable_conn.stream, &req, &res, context) catch |err| {
                     std.log.warn("Handler error: {}", .{err});
                     res.sendError(500, "Internal Server Error") catch {};
                 };
