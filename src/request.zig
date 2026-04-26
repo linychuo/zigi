@@ -1,5 +1,6 @@
 const std = @import("std");
 const net = std.net;
+const util = @import("util.zig");
 
 pub const Method = enum {
     GET,
@@ -78,7 +79,7 @@ pub const Request = struct {
 
     pub fn body(self: *Request, stream: net.Stream, max_size: usize) ![]u8 {
         if (self.chunked_transfer) {
-            return decodeChunkedBody(stream, self.allocator, max_size);
+            return util.decodeChunkedBody(stream, self.allocator, max_size);
         }
         const content_len = self.content_length orelse return error.NoContentLength;
         if (content_len > max_size) return error.BodyTooLarge;
@@ -119,71 +120,12 @@ pub const Request = struct {
         return buf;
     }
 
-fn decodeChunkedBody(stream: net.Stream, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
-
-    while (true) {
-        var size_buf: [32]u8 = undefined;
-        var size_len: usize = 0;
-
-        while (size_len < size_buf.len) {
-            const n = try stream.read(size_buf[size_len..1]);
-            if (n == 0) return error.ConnectionClosed;
-            size_len += n;
-            if (size_len >= 2 and size_buf[size_len - 1] == '\n' and size_buf[size_len - 2] == '\r') break;
-        }
-
-        if (size_len < 3) break;
-
-        const chunk_size = std.fmt.parseUnsigned(usize, std.mem.trim(u8, size_buf[0..size_len - 2], " \t"), 16) catch 0;
-        if (chunk_size == 0) break;
-        if (result.items.len + chunk_size > max_size) return error.BodyTooLarge;
-
-        try result.ensureUnusedCapacity(chunk_size);
-        const n = try stream.readAtLeast(result.unusedCapacitySlice(), chunk_size);
-        result.items.len += n;
-
-        _ = try stream.read(&[_]u8{ 0, 0 });
-    }
-
-    return try result.toOwnedSlice();
-}
-
-pub fn decodeUrl(self: *Request) void {
-        if (decodePercent(self.url, self.allocator)) |decoded| {
+    pub fn decodeUrl(self: *Request) void {
+        if (util.decodePercent(self.url, self.allocator)) |decoded| {
             self.url = decoded;
         }
-        if (decodePercent(self.query, self.allocator)) |decoded| {
+        if (util.decodePercent(self.query, self.allocator)) |decoded| {
             self.query = decoded;
         }
     }
 };
-
-fn decodePercent(s: []const u8, allocator: std.mem.Allocator) ?[]u8 {
-    var result = allocator.alloc(u8, s.len) catch return null;
-    errdefer allocator.free(result);
-    var j: usize = 0;
-    var i: usize = 0;
-    while (i < s.len) : (i += 1) {
-        if (s[i] == '%' and i + 2 < s.len) {
-            const hex = s[i + 1..i + 3];
-            if (std.fmt.parseInt(u8, hex, 16)) |val| {
-                result[j] = val;
-                j += 1;
-                i += 2;
-            } else |_| {
-                result[j] = s[i];
-                j += 1;
-            }
-        } else {
-            result[j] = s[i];
-            j += 1;
-        }
-    }
-    if (j < s.len) {
-        const shorter = allocator.realloc(result, j) catch result;
-        result = shorter;
-    }
-    return result;
-}

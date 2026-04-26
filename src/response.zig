@@ -101,7 +101,15 @@ pub const Response = struct {
     }
 
     pub fn continue_(self: Response) !void {
-        try self.stream.writeAll("HTTP/1.1 100 Continue\r\n\r\n");
+        var header_buf: [256]u8 = undefined;
+        const header = std.fmt.bufPrint(
+            &header_buf,
+            "HTTP/1.1 100 Continue\r\nAccess-Control-Allow-Origin: {s}\r\n\r\n",
+            .{self.cors_origin},
+        ) catch {
+            return;
+        };
+        try self.stream.writeAll(header);
     }
 
     pub fn sendError(self: Response, status_code: u16, message: []const u8) !void {

@@ -4,10 +4,11 @@ Lightweight HTTP server library for Zig.
 
 ## Features
 
-- Compile-time route definitions
-- Method + URL routing (exact and prefix matching)
-- Streaming request/response support
+- Compile-time route definitions with path parameters (e.g., `/user/:id`)
+- Method + URL routing (exact, prefix, and param matching)
 - Chunked transfer encoding support
+- URL percent-decoding
+- Configurable CORS
 - Thread-safe server shutdown via atomic flags
 - Handles non-standard CRLF (LocalSend clients)
 
@@ -16,25 +17,30 @@ Lightweight HTTP server library for Zig.
 ```zig
 const zigi = @import("zigi");
 
-fn handleHello(stream: std.net.Stream, req: *zigi.Request, context: ?*anyopaque) !void {
-    _ = req;
-    _ = context;
-    const res = zigi.Response.init(stream);
-    try res.json(200, "{\"message\":\"Hello!\"}");
+const Context = struct {
+    request_count: u32 = 0,
+};
+
+fn handleHello(req: *zigi.Request, res: *zigi.Response, context: ?*anyopaque) !void {
+    const ctx = @as(*Context, @ptrCast(@alignCast(context)));
+    ctx.request_count += 1;
+    try res.json(200, "Hello!");
 }
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
+    var ctx = Context{};
     var server = try zigi.Server.init(gpa.allocator(), 8080);
     defer server.deinit();
 
     const routes = .{
         zigi.GET("/hello", handleHello),
+        zigi.GET("/user/:id", handleUser),
     };
 
-    try server.run(routes, null);
+    try server.run(routes, &ctx);
 }
 ```
 
@@ -47,9 +53,11 @@ pub fn main() !void {
 - `req.query` - Query string without `?`
 - `req.headers` - Raw headers buffer
 - `req.content_length` - Content-Length if present
-- `req.stream` - Raw TCP stream for streaming uploads
+- `req.chunked_transfer` - True if Transfer-Encoding: chunked
 - `req.getHeader(name)` - Get header value (case-insensitive)
-- `req.getQueryParam(param)` - Extract query parameter
+- `req.getQueryParam(param)` - Extract query parameter value
+- `req.body(stream, max_size)` - Read request body (supports chunked)
+- `req.decodeUrl()` - Decode percent-encoded URL
 
 ### Response
 
@@ -57,18 +65,29 @@ pub fn main() !void {
 - `res.send(status, content_type, body)` - Send raw response
 - `res.ok()` / `res.okEmpty()` - Empty 200 OK
 - `res.badRequest(msg)` / `res.notFound(msg)` / etc.
+- `res.html(status, body)` - Send HTML response
+- `res.file(status, body, filename)` - Send file with auto content-type
+- `res.withCors(origin)` - Create response with custom CORS origin
 
 ### Server
 
 - `Server.init(allocator, port)` - Create server
-- `Server.run(routes, context)` - Start listening
+- `Server.run(routes, context)` - Start listening (blocks)
+- `Server.setConnectionTimeout(seconds)` - Set parse timeout
 - `Server.deinit()` - Graceful shutdown
 
 ### Routes
 
-- `zigi.GET(url, handler)` - GET route
-- `zigi.POST(url, handler)` - POST route
+- `zigi.GET(url, handler)` / `zigi.POST(url, handler)` / etc.
+- `zigi.route(method, url, handler)` - Exact URL match
 - `zigi.routePrefix(method, prefix, handler)` - Prefix matching
+- Path parameters: `zigi.GET("/user/:id", handler)` captures `123` from `/user/123`
+
+### Handler Signature
+
+```zig
+fn handler(req: *zigi.Request, res: *zigi.Response, context: ?*anyopaque) anyerror!void
+```
 
 ## Installation
 
@@ -99,3 +118,15 @@ exe.root_module.addImport("zigi", zigi_mod);
 ## Dependencies
 
 None. Pure Zig standard library.
+
+## Project Structure
+
+```
+src/
+├── zigi.zig      # Public API facade
+├── request.zig   # Request parsing and Method enum
+├── response.zig  # Response building and Status/ContentType
+├── route.zig     # Route definitions and handlers
+├── server.zig    # Server implementation
+└── util.zig      # URL decoding and chunked body parsing
+```
